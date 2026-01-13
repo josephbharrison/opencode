@@ -44,7 +44,7 @@ import { ImagePreview } from "@opencode-ai/ui/image-preview"
 import { ModelSelectorPopover } from "@/components/dialog-select-model"
 import { DialogSelectModelUnpaid } from "@/components/dialog-select-model-unpaid"
 import { useProviders } from "@/hooks/use-providers"
-import { useCommand } from "@/context/command"
+import { useCommand, parseKeybind, matchKeybind } from "@/context/command"
 import { Persist, persisted } from "@/utils/persist"
 import { Identifier } from "@/utils/id"
 import { SessionContextUsage } from "@/components/session-context-usage"
@@ -362,6 +362,12 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   createEffect(() => {
     if (!isFocused()) setStore("popover", null)
+  })
+
+  // Safety: reset composing state on focus change to prevent stuck state
+  // This handles edge cases where compositionend event may not fire
+  createEffect(() => {
+    if (!isFocused()) setComposing(false)
   })
 
   type AtOption = { type: "agent"; name: string; display: string } | { type: "file"; path: string; display: string }
@@ -881,6 +887,17 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       }
     }
 
+    // Handle newline keybinds BEFORE IME check - newline keybinds are never used for IME input
+    // and should always insert a newline regardless of composition state
+    // Use config keybinds (default: "shift+return,ctrl+return,alt+return,ctrl+j")
+    const newlineKeybindConfig = sync.data.config?.keybinds?.input_newline ?? "shift+return,ctrl+return,alt+return,ctrl+j"
+    const newlineKeybinds = parseKeybind(newlineKeybindConfig)
+    if (matchKeybind(newlineKeybinds, event)) {
+      addPart({ type: "text", content: "\n", start: 0, end: 0 })
+      event.preventDefault()
+      return
+    }
+
     if (event.key === "Enter" && isImeComposing(event)) {
       return
     }
@@ -944,11 +961,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       return
     }
 
-    if (event.key === "Enter" && event.shiftKey) {
-      addPart({ type: "text", content: "\n", start: 0, end: 0 })
-      event.preventDefault()
-      return
-    }
+    // Note: Shift+Enter is handled earlier, before IME check
     if (event.key === "Enter" && !event.shiftKey) {
       handleSubmit(event)
     }
